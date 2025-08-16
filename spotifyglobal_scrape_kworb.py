@@ -61,4 +61,21 @@ def parse_kworb_song_page(url, delay=2):
         # Find the data table (usually the first table with streaming data)
         text_content = soup.get_text()        
 
+        # Split by lines and process the tabular data
+        lines = text_content.split('\n')
+
+        # Find the header line with countries
+        header_idx = None
+        country_headers = []
+
+        for i, line in enumerate(lines):
+            if 'Date' in line and 'Global' in line and 'Total' in line:
+                # This is our header line
+                header_idx = i
+                # Split and clean the header
+                countries = [col.strip() for col in line.split('|') if col.strip()]
+                country_headers = countries
+                break            
+
+
 
