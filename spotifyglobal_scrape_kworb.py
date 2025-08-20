@@ -1,4 +1,4 @@
-# Spotify global scraping and analysis from kworb.net (Static data)
+# Spotify global scraping and analysis from kworb.net (Fixed version)
 
 # Import useful packages
 from bs4 import BeautifulSoup
@@ -6,12 +6,8 @@ import pandas as pd
 import requests
 import re
 from time import sleep
-from datetime import date, timedelta
-import matplotlib.pyplot as plt
+from datetime import datetime
 import numpy as np
-
-# map site
-url = "https://kworb.net/spotify/track/19GxfaRs5KdurzPKLVX3Cq.html"
 
 def get_song_metadata(soup):
     """Extract song and metadata from page"""
@@ -31,12 +27,13 @@ def get_song_metadata(soup):
     except:
         return "Unknown", "Unknown"
 
-def parse_kworb_song_page(url, delay=2):
+def parse_kworb_song_page(url, delay=2, view_type='weekly'):
     """
     Scrape streaming data from a kworb song page
+    view_type: 'weekly' or 'daily' - determines which data to scrape
     Returns a DataFrame with date, position, streams for each country
     """
-    print(f"Scraping: {url}")
+    print(f"Scraping: {url} ({view_type} view)")
     # Set up headers to look like a real browser
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
@@ -58,88 +55,104 @@ def parse_kworb_song_page(url, delay=2):
         title, artist = get_song_metadata(soup)
         print(f"Song: {title} by {artist}")
 
-        # Find the data table (usually the first table with streaming data)
-        text_content = soup.get_text()        
+        # Find the appropriate data table based on view type
+        if view_type == 'weekly':
+            table_container = soup.find('div', class_='weekly')
+        elif view_type == 'daily':
+            table_container = soup.find('div', class_='daily')
+        else:
+            print(f"Invalid view_type: {view_type}. Use 'weekly' or 'daily'")
+            return None
+            
+        if not table_container:
+            # Fallback to any table if specific container not found
+            table_container = soup
+            print(f"Could not find {view_type} container, trying any table")
+        
+        table = table_container.find('table')
+        if not table:
+            print("Could not find data table")
+            return None
 
-        # Split by lines and process the tabular data
-        lines = text_content.split('\n')
+        # Get all rows from the table
+        rows = table.find_all('tr')
+        if len(rows) < 2:
+            print("Table has insufficient rows")
+            return None
 
-        # Find the header line with countries
-        header_idx = None
-        country_headers = []
+        # Extract headers from the first row
+        header_row = rows[0]
+        headers = [th.get_text().strip() for th in header_row.find_all('th')]
+        
+        if not headers or 'Date' not in headers:
+            print("Could not find proper table headers")
+            return None
 
-        for i, line in enumerate(lines):
-            if 'Date' in line and 'Global' in line and 'Total' in line:
-                # This is our header line
-                header_idx = i
-                # Split and clean the header
-                countries = [col.strip() for col in line.split('|') if col.strip()]
-                country_headers = countries
-                break           
-            if not header_idx:
-                print("Could not find data table header")
-                return None
-
-        print (f"Found {len(country_headers)} columns: {country_headers[:5]}...") 
+        print(f"Found {len(headers)} columns: {headers}")
 
         # Process data rows
         data_rows = []
 
-        for i in range(header_idx + 1, len(lines)):
-            line = lines[i].strip()
-
-            # Skip empty lines and non-data lines
-            if not line or 'Total' in line or 'Peak' in line:
+        for row in rows[1:]:  # Skip header row
+            cells = row.find_all('td')
+            if not cells:
                 continue
 
-            # Check if this line contains a date (YYYY/MM/DD format)
-            if re.match(r'^\d{4}/\d{2}/\d{2}', line):
-                # Split by | and process
-                columns = [col.strip() for col in line.split('|') if col.strip()]
+            # Get the date from first cell
+            date_cell = cells[0].get_text().strip()
+            
+            # Skip Total and Peak rows
+            if date_cell in ['Total', 'Peak']:
+                continue
+            
+            # Check if this is a valid date row (YYYY/MM/DD format)
+            if not re.match(r'^\d{4}/\d{2}/\d{2}', date_cell):
+                continue
 
-                if len(columns) >= len(country_headers):
-                    try:
-                        date_str = columns[0]
-                        # Convert date format from YYYY/MM/DD to YYYY-MM-DD
-                        date_obj = datetime.striptime(date_str, '%Y/%m/%d')
-                        formatted_date = date_obj.strftime('%Y-%m-%d')
+            try:
+                # Convert date format from YYYY/MM/DD to YYYY-MM-DD
+                date_obj = datetime.strptime(date_cell, '%Y/%m/%d')
+                formatted_date = date_obj.strftime('%Y-%m-%d')
 
-                        row_data = {'date': formatted_date, 'title': title, 'artist': artist}
+                row_data = {
+                    'date': formatted_date, 
+                    'title': title, 
+                    'artist': artist,
+                    'view_type': view_type
+                }
 
-                        # Process each country column
-                        for j, country in enumerate(country_headers[1:], 1): # Skip 'Date' column
-                            if j < len(columns):
-                                cell_value = columns[j]
+                # Process each country column
+                for i, country in enumerate(headers[1:], 1):  # Skip 'Date' column
+                    if i < len(cells):
+                        cell = cells[i]
+                        cell_text = cell.get_text().strip()
 
-                                # Parse position and streams from format like "59 (12,988,280)" or "--
-                                if cell_value == '--' or not cell_value:
-                                    position = None
-                                    streams = None
-                                else:
-                                    # Extract position and streams using regex
-                                    match = re.match(r'(\d+)\s*\(([0-9,]+)\)', cell_value)
-                                    if match:
-                                        position = int(match.group(1))
-                                        streams = int(match.group(2).replace(',', ''))
-                                    else:
-                                        # Handle cases where only streams are given
-                                        streams_match = re.search(r'([0-9,]+)', cell_value)
-                                        if streams_match:
-                                            position = None
-                                            streams = int(streams_match.group(1).replace(',', ''))
-                                        else:
-                                            position = None
-                                            streams = None
-
-                                    # Add position and streams for this country
-                                    row_data[f'{country}_position'] = position
-                                    row_data[f'{country}_streams'] = streams
+                        # Parse position and streams
+                        if cell_text == '--' or not cell_text:
+                            position = None
+                            streams = None
+                        else:
+                            # Look for position (in span with class 'p') and streams (in span with class 's')
+                            position_span = cell.find('span', class_='p')
+                            streams_span = cell.find('span', class_='s')
                             
-                            data_rows.append(row_data)    
+                            position = int(position_span.get_text().strip()) if position_span else None
+                            
+                            if streams_span:
+                                streams_text = streams_span.get_text().strip().replace(',', '')
+                                streams = int(streams_text) if streams_text.isdigit() else None
+                            else:
+                                streams = None
 
-                    except Exception as e:
-                        print(f"Error processing line: {line[:50]}... Error: {e}")
-                        continue    
+                        # Add position and streams for this country
+                        row_data[f'{country}_position'] = position
+                        row_data[f'{country}_streams'] = streams
+
+                data_rows.append(row_data)
+
+            except Exception as e:
+                print(f"Error processing row with date {date_cell}: {e}")
+                continue
 
         if not data_rows:
             print("No data rows found")
@@ -154,17 +167,18 @@ def parse_kworb_song_page(url, delay=2):
         # Sort by date
         df = df.sort_values('date')
 
-        print(f"Successfully scraped {len(df)} daily records")
+        print(f"Successfully scraped {len(df)} {view_type} records")
         return df
     
     except Exception as e:
         print(f"Error scraping {url}: {e}")
         return None
 
-def scrape_multiple_songs(song_ids, base_url="https://kworb.net/spotify/track/", delay=2)
+def scrape_multiple_songs(song_ids, base_url="https://kworb.net/spotify/track/", delay=2, view_type='weekly'):
     """
     Scrape multiple songs from kworb
     song_ids: list of Spotify track IDs
+    view_type: 'weekly' or 'daily' - determines which data to scrape
     """
     all_data = []
 
@@ -172,7 +186,7 @@ def scrape_multiple_songs(song_ids, base_url="https://kworb.net/spotify/track/",
         print(f"\n--- Scraping song {i+1}/{len(song_ids)} ---")
         url = f"{base_url}{song_id}.html"
 
-        df = parse_kworb_song_page(url, delay)
+        df = parse_kworb_song_page(url, delay, view_type)
 
         if df is not None:
             # Add song_id to the dataframe
@@ -182,13 +196,13 @@ def scrape_multiple_songs(song_ids, base_url="https://kworb.net/spotify/track/",
             print(f"Failed to scrape data for song ID: {song_id}")
 
     if all_data:
-        # Combine all DataFramse
-        combined_dd = pd.concat(all_data, ignore_index=True)
+        # Combine all DataFrames
+        combined_df = pd.concat(all_data, ignore_index=True)
         return combined_df
     else:
         print("No data was successfully scraped")
         return None
-    
+
 def analyze_streaming_trends(df, country='Global'):
     """
     Analyze streaming trends for a specific country
@@ -236,6 +250,77 @@ def analyze_streaming_trends(df, country='Global'):
             best_position_date = song_data.loc[song_data[position_col].idxmin(), 'date']
             print(f"Best chart position: #{best_position} on {best_position_date.strftime('%Y-%m-%d')}")
 
+# Additional utility functions
+def get_song_id_from_spotify_url(spotify_url):
+    """Extract song ID from Spotify URL"""
+    if "track/" in spotify_url:
+        return spotify_url.split("track/")[1].split("?")[0]
+    return None
+
+def scrape_both_views(song_ids, base_url="https://kworb.net/spotify/track/", delay=2):
+    """
+    Scrape both weekly and daily data for multiple songs
+    song_ids: list of Spotify track IDs
+    Returns a dictionary with 'weekly' and 'daily' DataFrames
+    """
+    results = {}
+    
+    print("=== Scraping Weekly Data ===")
+    weekly_df = scrape_multiple_songs(song_ids, base_url, delay, 'weekly')
+    results['weekly'] = weekly_df
+    
+    print("\n=== Scraping Daily Data ===")
+    daily_df = scrape_multiple_songs(song_ids, base_url, delay, 'daily')
+    results['daily'] = daily_df
+    
+    return results
+def create_streaming_chart(df, song_id, countries=['Global', 'US', 'PH']):
+    """Create a streaming chart for visualization"""
+    try:
+        import matplotlib.pyplot as plt
+        import matplotlib.dates as mdates
+
+        song_data = df[df['song_id'] == song_id].copy()
+        if song_data.empty:
+            print(f"No data found for song ID: {song_id}")
+            return
+        
+        title = song_data['title'].iloc[0]
+        artist = song_data['artist'].iloc[0]
+        view_type = song_data['view_type'].iloc[0] if 'view_type' in song_data.columns else 'weekly'
+
+        plt.figure(figsize=(12,8))
+
+        for country in countries:
+            streams_col = f'{country}_streams'
+            if streams_col in song_data.columns:
+                data = song_data.dropna(subset=[streams_col])
+                if not data.empty:
+                    plt.plot(data['date'], data[streams_col], marker='o', label=country, linewidth=2)
+
+        plt.title(f'{view_type.capitalize()} Streams: {title} by {artist}', fontsize=14, fontweight='bold')
+        plt.xlabel('Date')
+        plt.ylabel(f'{view_type.capitalize()} Streams')
+        plt.legend()
+        plt.grid(True, alpha=0.3)
+        
+        # Format x-axis based on view type
+        if view_type == 'daily':
+            plt.gca().xaxis.set_major_locator(mdates.DayLocator(interval=7))
+        else:
+            plt.gca().xaxis.set_major_locator(mdates.WeekdayLocator(interval=1))
+            
+        plt.gca().xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d'))
+        plt.xticks(rotation=45)
+        
+        plt.tight_layout()
+        plt.show()
+        
+    except ImportError:
+        print("Matplotlib not installed. Install with: pip install matplotlib")
+    except Exception as e:
+        print(f"Error creating chart: {e}")
+
 # Example usage
 if __name__ == "__main__":
     # Example song IDs (you can replace with your own)
@@ -246,27 +331,48 @@ if __name__ == "__main__":
 
     print("Scraping song streaming data from kworb.net...")
 
-    # Scrape the data
-    df = scrape_multiple_songs(song_ids, delay =2)
+    # Option 1: Scrape only weekly data
+    print("\n=== Weekly Data Only ===")
+    weekly_df = scrape_multiple_songs(song_ids, delay=2, view_type='weekly')
+    if weekly_df is not None:
+        weekly_df.to_csv('kworb_weekly_data.csv', index=False)
+        print(f"Weekly data saved to 'kworb_weekly_data.csv' ({len(weekly_df)} records)")
 
-    if df is not None:
-        # Save to csv
-        df.to_csv('kworb_streaming_data.csv', index=False)
-        print(f"\nData saved to 'kworb_streaming_data.csv'")
-        print(f"Total records: {len(df)}")
+    # Option 2: Scrape only daily data  
+    print("\n=== Daily Data Only ===")
+    daily_df = scrape_multiple_songs(song_ids, delay=2, view_type='daily')
+    if daily_df is not None:
+        daily_df.to_csv('kworb_daily_data.csv', index=False)
+        print(f"Daily data saved to 'kworb_daily_data.csv' ({len(daily_df)} records)")
+
+    # Option 3: Scrape both weekly and daily data
+    print("\n=== Both Weekly and Daily Data ===")
+    both_data = scrape_both_views(song_ids, delay=2)
+    
+    if both_data['weekly'] is not None:
+        both_data['weekly'].to_csv('kworb_weekly_data.csv', index=False)
+        print(f"Weekly data: {len(both_data['weekly'])} records")
         
+    if both_data['daily'] is not None:
+        both_data['daily'].to_csv('kworb_daily_data.csv', index=False)
+        print(f"Daily data: {len(both_data['daily'])} records")
 
+    # Analyze trends
+    if weekly_df is not None:
+        analyze_streaming_trends(weekly_df, 'Global')
+        
+    if daily_df is not None:
+        analyze_streaming_trends(daily_df, 'Global')
+        
+    # Create charts
+    if weekly_df is not None and len(song_ids) > 0:
+        create_streaming_chart(weekly_df, song_ids[0], ['Global', 'US', 'PH'])
+        
+    if daily_df is not None and len(song_ids) > 0:
+        create_streaming_chart(daily_df, song_ids[0], ['Global', 'US', 'PH'])
 
-
-
-
-
-            
-
-
-                                
-
-
-
-
-
+print("Kworb scraper ready!")
+print("Usage examples:")
+print("- Weekly data: scrape_multiple_songs(song_ids, view_type='weekly')")
+print("- Daily data: scrape_multiple_songs(song_ids, view_type='daily')")
+print("- Both views: scrape_both_views(song_ids)")

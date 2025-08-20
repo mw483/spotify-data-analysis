@@ -1,0 +1,330 @@
+# Kworb Data Visualization Tool (Independent of Scraper)
+
+import pandas as pd
+import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
+from datetime import datetime
+import numpy as np
+
+class KworbVisualizer:
+    def __init__(self, csv_file_path):
+        """
+        Initialize the visualizer with a CSV file containing kworb data
+        
+        Expected CSV columns:
+        - date: Date in YYYY-MM-DD format
+        - title: Song title
+        - artist: Artist name
+        - view_type: 'weekly' or 'daily'
+        - song_id: Spotify track ID (optional)
+        - {Country}_position: Chart position for each country
+        - {Country}_streams: Stream count for each country
+        """
+        self.df = pd.read_csv(csv_file_path)
+        self.prepare_data()
+        
+    def prepare_data(self):
+        """Clean and prepare the data for visualization"""
+        # Convert date column to datetime
+        self.df['date'] = pd.to_datetime(self.df['date'])
+        
+        # Sort by date
+        self.df = self.df.sort_values(['song_id', 'date'])
+        
+        # Get available countries
+        self.countries = [col.replace('_streams', '') for col in self.df.columns if '_streams' in col]
+        
+        print(f"Data loaded: {len(self.df)} records")
+        print(f"Available countries: {self.countries}")
+        print(f"Songs: {self.df.groupby(['title', 'artist']).size().to_dict()}")
+        
+    def get_songs(self):
+        """Get list of available songs"""
+        songs = self.df.groupby(['title', 'artist', 'song_id']).size().reset_index(name='records')
+        return songs[['title', 'artist', 'song_id']].to_dict('records')
+    
+    def plot_streams_comparison(self, countries=['Global', 'US', 'PH'], view_type='weekly', 
+                               song_filter=None, figsize=(14, 8)):
+        """
+        Plot streaming data comparison across countries
+        
+        Parameters:
+        - countries: List of countries to compare
+        - view_type: 'weekly' or 'daily' or 'both'
+        - song_filter: Dict with keys 'title', 'artist', or 'song_id' to filter specific song
+        - figsize: Figure size tuple
+        """
+        data = self.df.copy()
+        
+        # Filter by view type
+        if view_type != 'both':
+            data = data[data['view_type'] == view_type]
+        
+        # Filter by song if specified
+        if song_filter:
+            for key, value in song_filter.items():
+                if key in data.columns:
+                    data = data[data[key] == value]
+        
+        if data.empty:
+            print("No data found for the specified filters")
+            return
+        
+        fig, axes = plt.subplots(len(data['song_id'].unique()), 1, figsize=figsize, squeeze=False)
+        if len(data['song_id'].unique()) == 1:
+            axes = [axes[0]]
+        else:
+            axes = axes.flatten()
+        
+        for i, song_id in enumerate(data['song_id'].unique()):
+            song_data = data[data['song_id'] == song_id]
+            title = song_data['title'].iloc[0]
+            artist = song_data['artist'].iloc[0]
+            
+            ax = axes[i]
+            
+            # Plot each country
+            for country in countries:
+                streams_col = f'{country}_streams'
+                if streams_col in song_data.columns:
+                    country_data = song_data.dropna(subset=[streams_col])
+                    if not country_data.empty:
+                        # If both weekly and daily, use different line styles
+                        if view_type == 'both':
+                            weekly_data = country_data[country_data['view_type'] == 'weekly']
+                            daily_data = country_data[country_data['view_type'] == 'daily']
+                            
+                            if not weekly_data.empty:
+                                ax.plot(weekly_data['date'], weekly_data[streams_col], 
+                                       marker='o', label=f'{country} (Weekly)', linewidth=2, linestyle='-')
+                            if not daily_data.empty:
+                                ax.plot(daily_data['date'], daily_data[streams_col], 
+                                       marker='s', label=f'{country} (Daily)', linewidth=1, linestyle='--', alpha=0.7)
+                        else:
+                            ax.plot(country_data['date'], country_data[streams_col], 
+                                   marker='o', label=country, linewidth=2)
+            
+            ax.set_title(f'{title} by {artist}', fontsize=12, fontweight='bold')
+            ax.set_xlabel('Date')
+            ax.set_ylabel('Streams')
+            ax.legend()
+            ax.grid(True, alpha=0.3)
+            
+            # Format x-axis
+            ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d'))
+            if view_type == 'daily':
+                ax.xaxis.set_major_locator(mdates.DayLocator(interval=7))
+            else:
+                ax.xaxis.set_major_locator(mdates.WeekdayLocator(interval=1))
+            
+            plt.setp(ax.xaxis.get_majorticklabels(), rotation=45)
+        
+        plt.tight_layout()
+        plt.show()
+    
+    def plot_chart_positions(self, countries=['Global', 'US', 'PH'], view_type='weekly', 
+                           song_filter=None, figsize=(14, 8)):
+        """Plot chart positions over time (lower is better)"""
+        data = self.df.copy()
+        
+        # Filter by view type
+        if view_type != 'both':
+            data = data[data['view_type'] == view_type]
+        
+        # Filter by song if specified
+        if song_filter:
+            for key, value in song_filter.items():
+                if key in data.columns:
+                    data = data[data[key] == value]
+        
+        if data.empty:
+            print("No data found for the specified filters")
+            return
+        
+        fig, axes = plt.subplots(len(data['song_id'].unique()), 1, figsize=figsize, squeeze=False)
+        if len(data['song_id'].unique()) == 1:
+            axes = [axes[0]]
+        else:
+            axes = axes.flatten()
+        
+        for i, song_id in enumerate(data['song_id'].unique()):
+            song_data = data[data['song_id'] == song_id]
+            title = song_data['title'].iloc[0]
+            artist = song_data['artist'].iloc[0]
+            
+            ax = axes[i]
+            
+            # Plot each country
+            for country in countries:
+                position_col = f'{country}_position'
+                if position_col in song_data.columns:
+                    country_data = song_data.dropna(subset=[position_col])
+                    if not country_data.empty:
+                        ax.plot(country_data['date'], country_data[position_col], 
+                               marker='o', label=country, linewidth=2)
+            
+            ax.set_title(f'Chart Positions: {title} by {artist}', fontsize=12, fontweight='bold')
+            ax.set_xlabel('Date')
+            ax.set_ylabel('Chart Position')
+            ax.legend()
+            ax.grid(True, alpha=0.3)
+            
+            # Invert y-axis since lower chart position is better
+            ax.invert_yaxis()
+            
+            # Format x-axis
+            ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d'))
+            if view_type == 'daily':
+                ax.xaxis.set_major_locator(mdates.DayLocator(interval=7))
+            else:
+                ax.xaxis.set_major_locator(mdates.WeekdayLocator(interval=1))
+            
+            plt.setp(ax.xaxis.get_majorticklabels(), rotation=45)
+        
+        plt.tight_layout()
+        plt.show()
+    
+    def analyze_trends(self, country='Global', view_type='weekly'):
+        """Analyze streaming trends for each song"""
+        data = self.df[self.df['view_type'] == view_type].copy()
+        streams_col = f'{country}_streams'
+        position_col = f'{country}_position'
+        
+        if streams_col not in data.columns:
+            print(f"No data found for {country}")
+            print(f"Available countries: {self.countries}")
+            return
+        
+        print(f"\n=== {country} {view_type.capitalize()} Analysis ===")
+        
+        for song_id in data['song_id'].unique():
+            song_data = data[data['song_id'] == song_id]
+            song_data = song_data.dropna(subset=[streams_col])
+            
+            if song_data.empty:
+                continue
+            
+            title = song_data['title'].iloc[0]
+            artist = song_data['artist'].iloc[0]
+            
+            print(f"\n--- {title} by {artist} ---")
+            print(f"Date range: {song_data['date'].min().strftime('%Y-%m-%d')} to {song_data['date'].max().strftime('%Y-%m-%d')}")
+            print(f"Total periods tracked: {len(song_data)}")
+            
+            # Stream analytics
+            total_streams = song_data[streams_col].sum()
+            avg_streams = song_data[streams_col].mean()
+            peak_streams = song_data[streams_col].max()
+            peak_date = song_data.loc[song_data[streams_col].idxmax(), 'date']
+            
+            print(f"Total streams: {total_streams:,}")
+            print(f"Average {view_type} streams: {avg_streams:,.0f}")
+            print(f"Peak {view_type} streams: {peak_streams:,} on {peak_date.strftime('%Y-%m-%d')}")
+            
+            # Position analytics (if available)
+            if position_col in song_data.columns:
+                position_data = song_data.dropna(subset=[position_col])
+                if not position_data.empty:
+                    best_position = position_data[position_col].min()
+                    best_position_date = position_data.loc[position_data[position_col].idxmin(), 'date']
+                    avg_position = position_data[position_col].mean()
+                    print(f"Best chart position: #{best_position} on {best_position_date.strftime('%Y-%m-%d')}")
+                    print(f"Average position: #{avg_position:.1f}")
+    
+    def export_summary(self, output_file='kworb_summary.csv'):
+        """Export a summary of all songs and their peak performance"""
+        summary_data = []
+        
+        for song_id in self.df['song_id'].unique():
+            song_data = self.df[self.df['song_id'] == song_id]
+            title = song_data['title'].iloc[0]
+            artist = song_data['artist'].iloc[0]
+            
+            # Get data for each view type and country
+            for view_type in ['weekly', 'daily']:
+                view_data = song_data[song_data['view_type'] == view_type]
+                if view_data.empty:
+                    continue
+                    
+                for country in self.countries:
+                    streams_col = f'{country}_streams'
+                    position_col = f'{country}_position'
+                    
+                    if streams_col in view_data.columns:
+                        streams_data = view_data.dropna(subset=[streams_col])
+                        if not streams_data.empty:
+                            total_streams = streams_data[streams_col].sum()
+                            peak_streams = streams_data[streams_col].max()
+                            peak_date = streams_data.loc[streams_data[streams_col].idxmax(), 'date']
+                            
+                            best_position = None
+                            if position_col in streams_data.columns:
+                                pos_data = streams_data.dropna(subset=[position_col])
+                                if not pos_data.empty:
+                                    best_position = pos_data[position_col].min()
+                            
+                            summary_data.append({
+                                'song_id': song_id,
+                                'title': title,
+                                'artist': artist,
+                                'country': country,
+                                'view_type': view_type,
+                                'total_streams': total_streams,
+                                'peak_streams': peak_streams,
+                                'peak_date': peak_date.strftime('%Y-%m-%d'),
+                                'best_position': best_position,
+                                'periods_tracked': len(streams_data)
+                            })
+        
+        summary_df = pd.DataFrame(summary_data)
+        summary_df.to_csv(output_file, index=False)
+        print(f"Summary exported to {output_file}")
+        return summary_df
+
+# Example usage and helper functions
+def load_and_visualize(csv_file_path):
+    """Convenience function to load data and create basic visualizations"""
+    viz = KworbVisualizer(csv_file_path)
+    
+    # Show available songs
+    songs = viz.get_songs()
+    print("\nAvailable songs:")
+    for i, song in enumerate(songs):
+        print(f"{i+1}. {song['title']} by {song['artist']} (ID: {song['song_id']})")
+    
+    # Create some default visualizations
+    viz.plot_streams_comparison(['Global', 'US', 'PH'], view_type='weekly')
+    viz.plot_chart_positions(['Global', 'US', 'PH'], view_type='weekly')
+    viz.analyze_trends('Global', 'weekly')
+    
+    return viz
+
+if __name__ == "__main__":
+    # Example usage
+    csv_file = "kworb_data.csv"  # Your manually edited CSV file
+    
+    print("Kworb Data Visualizer")
+    print("====================")
+    
+    try:
+        viz = load_and_visualize(csv_file)
+        
+        # Export summary
+        summary = viz.export_summary('kworb_performance_summary.csv')
+        
+    except FileNotFoundError:
+        print(f"CSV file '{csv_file}' not found.")
+        print("\nCreate a CSV file with the following columns:")
+        print("- date (YYYY-MM-DD)")
+        print("- title")
+        print("- artist") 
+        print("- view_type (weekly/daily)")
+        print("- song_id")
+        print("- {Country}_position (e.g., Global_position, US_position)")
+        print("- {Country}_streams (e.g., Global_streams, US_streams)")
+        
+    print("\nVisualization functions available:")
+    print("- viz.plot_streams_comparison(['Global', 'US'], view_type='weekly')")
+    print("- viz.plot_chart_positions(['Global', 'US'], view_type='daily')")
+    print("- viz.analyze_trends('Global', 'weekly')")
+    print("- viz.export_summary('summary.csv')")
