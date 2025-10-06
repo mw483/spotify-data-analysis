@@ -14,7 +14,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 
 # File paths with glob
-path = "C:\Users\mikae\Documents\spotify_data_analysis_supplementary"
+path = "C:\Users\mikae\Documents\GitHub\spotify-data-analysis\spotify_data_analysis_supplementary\spotify_official_csv"
 file_pattern = path + '*.csv'
 
 # Read csv files

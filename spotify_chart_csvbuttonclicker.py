@@ -8,6 +8,9 @@ from webdriver_manager.chrome import ChromeDriverManager
 import time
 from datetime import datetime, timedelta
 
+# Setup download path
+download_path = "C:/Users/mikae/Documents/spotify_data_analysis_supplementary/spotify_official_csv/spotify_global"
+
 def generate_date_list(start_date, end_date):
     """Generate list of dates between start_date and end_date (inclusive)"""
     start = datetime.strptime(start_date, "%Y-%m-%d")
@@ -33,7 +36,8 @@ def setup_driver():
     options.add_argument("--silent")
     options.add_experimental_option('excludeSwitches', ['enable-logging'])
     options.add_experimental_option('useAutomationExtension', False)
-    
+    # options.add_experimental_option('download.default_directory', download_path)
+
     try:
         service = Service(ChromeDriverManager().install())
         driver = webdriver.Chrome(service=service, options=options)
@@ -109,8 +113,8 @@ def main():
     """Main function to download CSV files for multiple dates"""
     
     # Define date range
-    START_DATE = "2025-08-25"  # Change this to your desired start date
-    END_DATE = "2025-09-12"    # Change this to your desired end date
+    START_DATE = "2025-09-13"  # Change this to your desired start date
+    END_DATE = "2025-10-02"    # Change this to your desired end date
     
     # Generate list of dates
     dates = generate_date_list(START_DATE, END_DATE)
