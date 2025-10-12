@@ -1,4 +1,5 @@
 import spotipy
+import ignore_this
 from spotipy.oauth2 import SpotifyOAuth
 import pandas as pd
 import numpy as np
@@ -7,14 +8,14 @@ import plotly.graph_objects as go
 from datetime import datetime, timedelta
 from scipy import stats
 
-sp = spotipy.Spotify(auth_manager=SpotifyOAuth(client_id="",
-                    client_secret="",
+sp = spotipy.Spotify(auth_manager=SpotifyOAuth(client_id=ignore_this.CLIENT_ID,
+                    client_secret=ignore_this.CLIENT_SECRET,
                     redirect_uri="https://example.org/callback",
                     scope="playlist-read-private user-library-read"))
 
 # Playlist of all Twice songs + solos
 
-all_twice_playlist_id = "3US084x6JlblpTGhtI1TXA"
+all_twice_playlist_id = ignore_this.PLAYLIST_ID
 
 def get_all_playlist_tracks(id):
     all_tracks = []

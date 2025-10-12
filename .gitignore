@@ -1,0 +1,10 @@
+# .gitignore
+
+# Python cache
+__pycache__/
+
+# File for secrets
+ignore_this.py
+
+# Spotipy cache file
+.cache
